@@ -72,7 +72,7 @@ def preprocess_country_shape(geometry: Polygon) -> Polygon:
     return normalized.simplify(0.01)
 
 print("Loading country shapefile...")
-world_df = gpd.read_file("ne_10m_admin_0_countries/ne_10m_admin_0_countries.shp")
+world_df = gpd.read_file("countries/ne_10m_admin_0_countries.shp")
 world_df = world_df[world_df['TYPE'] == 'Sovereign country']
 world_df = world_df[world_df['NAME'] != 'Antarctica']
 COUNTRY_NAME_COLUMN = 'NAME'
