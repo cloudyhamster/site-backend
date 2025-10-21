@@ -43,9 +43,9 @@ class ShapeMatcher:
         coarse_result = differential_evolution(
             self._objective_function, 
             bounds, 
-            maxiter=30,
-            popsize=12,
-            tol=0.03,
+            maxiter=20,
+            popsize=10,
+            tol=0.05,
             seed=42
         )
         
