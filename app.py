@@ -143,5 +143,9 @@ def calculate_single():
     
     return jsonify(result)
 
+@app.route('/health', methods=['GET'])
+def health_check():
+    return jsonify({"status": "ok"}), 200
+
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0')
