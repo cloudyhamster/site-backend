@@ -18,7 +18,6 @@ class ShapeMatcher:
         if centered_shape.area == 0: return centered_shape
         scale_factor = 1.0 / np.sqrt(centered_shape.area)
         normalized = scale(centered_shape, xfact=scale_factor, yfact=scale_factor, origin=(0, 0))
-
         return normalized.simplify(0.01)
 
     def _apply_transform(self, shape: Polygon, params: tuple) -> Polygon:
@@ -39,36 +38,31 @@ class ShapeMatcher:
 
     def find_best_match(self) -> dict:
         bounds = [(0.5, 2.0), (-180, 180), (-1.0, 1.0), (-1.0, 1.0)]
-        
         coarse_result = differential_evolution(
             self._objective_function, 
             bounds, 
-            maxiter=20,
-            popsize=10,
-            tol=0.05,
+            maxiter=30,
+            popsize=12,
+            tol=0.03,
             seed=42
         )
-        
         fine_result = minimize(
             self._objective_function, 
             x0=coarse_result.x, 
             method='Powell', 
             options={'xtol': 1e-4, 'ftol': 1e-4}
         )
-        
         return {"similarity_score": 1.0 - fine_result.fun}
 
 def preprocess_country_shape(geometry: Polygon) -> Polygon:
     main_polygon = geometry
     if geometry.geom_type == 'MultiPolygon':
         main_polygon = max(geometry.geoms, key=lambda p: p.area)
-    
     centroid = main_polygon.centroid
     centered = translate(main_polygon, xoff=-centroid.x, yoff=-centroid.y)
     if centered.area == 0: return centered
     scale_factor = 1.0 / np.sqrt(centered.area)
     normalized = scale(centered, xfact=scale_factor, yfact=scale_factor, origin=(0, 0))
-
     return normalized.simplify(0.01)
 
 print("Loading country shapefile...")
@@ -78,7 +72,7 @@ world_df = world_df[world_df['NAME'] != 'Antarctica']
 COUNTRY_NAME_COLUMN = 'NAME'
 countries_df = world_df[[COUNTRY_NAME_COLUMN, 'geometry']].copy()
 print("Projecting geometries...")
-countries_df = countries_df.to_crs("EPSG:3395")
+countries_df = countries_df.to_crs("+proj=moll")
 
 print("Preprocessing all country shapes...")
 start_time = time.time()
@@ -93,32 +87,61 @@ executor = concurrent.futures.ThreadPoolExecutor()
 def worker_process(country_data: dict, user_polygon: Polygon) -> dict:
     country_name = country_data["name"]
     normalized_country_geom = country_data["norm_geom"]
-    
     matcher = ShapeMatcher(reference_shape=normalized_country_geom, test_shape=user_polygon)
     result = matcher.find_best_match()
-    
     return {"country": country_name, "score": result['similarity_score']}
 
 app = Flask(__name__)
+
 @app.route('/calculate', methods=['POST'])
 def calculate():
     start_time = time.time()
     data = request.get_json()
     if not data or 'shape_coords' not in data: return jsonify({"error": "Missing 'shape_coords'"}), 400
-
     try:
         user_poly = Polygon(data['shape_coords'])
         if not user_poly.is_valid: return jsonify({"error": "Invalid polygon."}), 400
     except Exception as e:
         return jsonify({"error": f"Could not create polygon: {e}"}), 400
-
     futures = [executor.submit(worker_process, country_data, user_poly) for country_data in PREPROCESSED_COUNTRIES]
     results = [future.result() for future in concurrent.futures.as_completed(futures)]
     sorted_results = sorted(results, key=lambda k: k['score'], reverse=True)
-    
     print(f"\n--- Full request processed in {time.time() - start_time:.2f} seconds ---")
-    
     return jsonify(sorted_results[:10])
+
+@app.route('/countries', methods=['GET'])
+def get_countries():
+    country_names = [country['name'] for country in PREPROCESSED_COUNTRIES]
+    return jsonify(sorted(country_names))
+
+@app.route('/calculate_single', methods=['POST'])
+def calculate_single():
+    start_time = time.time()
+    data = request.get_json()
+    
+    if not data or 'shape_coords' not in data or 'country_name' not in data:
+        return jsonify({"error": "Request must include 'shape_coords' and 'country_name'"}), 400
+
+    country_name_to_find = data['country_name']
+
+    try:
+        user_poly = Polygon(data['shape_coords'])
+        if not user_poly.is_valid:
+            return jsonify({"error": "Invalid polygon coordinates."}), 400
+    except Exception as e:
+        return jsonify({"error": f"Could not create polygon: {e}"}), 400
+
+    target_country_data = next((country for country in PREPROCESSED_COUNTRIES if country['name'].lower() == country_name_to_find.lower()), None)
+
+    if not target_country_data:
+        return jsonify({"error": f"Country '{country_name_to_find}' not found."}), 404
+
+    print(f"Calculating for single country: {target_country_data['name']}...")
+    result = worker_process(target_country_data, user_poly)
+    
+    print(f"--- Single country request processed in {time.time() - start_time:.2f} seconds ---")
+    
+    return jsonify(result)
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0')
