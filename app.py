@@ -3,6 +3,7 @@ import concurrent.futures
 import geopandas as gpd
 import numpy as np
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 from shapely.geometry import Polygon
 from shapely.affinity import translate, scale, rotate
 from scipy.optimize import differential_evolution, minimize
@@ -92,6 +93,7 @@ def worker_process(country_data: dict, user_polygon: Polygon) -> dict:
     return {"country": country_name, "score": result['similarity_score']}
 
 app = Flask(__name__)
+CORS(app)
 
 @app.route('/calculate', methods=['POST'])
 def calculate():
@@ -142,10 +144,6 @@ def calculate_single():
     print(f"--- Single country request processed in {time.time() - start_time:.2f} seconds ---")
     
     return jsonify(result)
-
-@app.route('/health', methods=['GET'])
-def health_check():
-    return jsonify({"status": "ok"}), 200
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0')
